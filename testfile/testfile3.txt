@@ -1,1 +1,62 @@
-int main(){return 0;}
+
+
+int is_true() {
+	return 1;
+}
+
+void test_if() {
+	int level = 1;
+	if (1 + 1 == 2) {
+		printf("If level: %d\n", level);
+		level = level + 1;
+		if (1 + 1 == 2) {
+			printf("If level: %d\n", level);
+			level = level + 1;
+			if (1 + 1 == 2) {
+				printf("If level: %d\n", level);
+				level = level + 1;
+				if (1 + 1 != 2) {
+					printf("If level: %d\n", level);
+					level = level + 1;
+				} else {
+					printf("Else level: %d\n", level);
+				}
+			}
+		} else {
+			printf("Else level: %d\n", level);
+		}
+	} else {
+		printf("Else level: %d\n", level);
+	}
+	
+	if (is_true()) {
+		printf("if + func is ok\n");
+	}
+	
+	int r = 1;
+	if (r) {
+		printf("if + var is ok\n");
+	}
+	
+	int array[2] = {0, 1};
+	if (array[1]) {
+		printf("if + array is ok\n");
+	}
+	
+	int matrix[2][2] = {{0, 1}, {1, 0}};
+	if (matrix[1][0]) {
+		printf("if + matrix is ok\n");
+	}
+	
+	int a = 2, b = -1, c = 0;
+	if ( !a && b || !c && (a + b)) {
+		printf("Condition exp is ok\n");
+	}
+	
+}
+
+int main() {
+	printf("19373163\n");
+	test_if();
+	return 0;
+}

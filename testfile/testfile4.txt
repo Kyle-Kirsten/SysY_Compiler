@@ -1,1 +1,23 @@
-int main(){return 0;}
+
+
+void test_while() {
+	int a = 1;
+	int k = 0;
+	while (k < 4) {
+		printf("a = %d\n", a);
+		a = a * 2;
+		k = k + 1;
+	}
+	printf("a = %d\n", a);
+	while (k > 0) {
+		a = a / 2;
+		k = k - 1;
+		printf("a = %d\n", a);
+	}
+}
+
+int main() {
+	printf("19373163\n");
+	test_while();
+	return 0;
+}
