@@ -1,3 +1,5 @@
+import grammar.CompUnit;
+import grammar.Grammarizer;
 import wordTokenizer.SequenceTokenizer;
 import wordTokenizer.Tokenizer;
 import wordTokenizer.Word;
@@ -12,13 +14,11 @@ public class Compiler {
         Tokenizer tokenizer = new SequenceTokenizer("testfile.txt");
         Word word;
         BufferedWriter output = new BufferedWriter(new FileWriter("output.txt", false));
-        while ((word = tokenizer.next()) != Word.END) {
-//            System.out.println(word.getCategory().toString() + " " + word.getName());
-//            if (word.getCategory().toString().equals("N")) {
-//                break;
-//            }
-            output.write(word.getCategory().toString() + " " + word.getName() + "\n");
-        }
+        Grammarizer grammarizer = new Grammarizer(tokenizer, output);
+        CompUnit compUnit = grammarizer.getAST();
+//        while ((word = tokenizer.next()) != Word.END) {
+//            output.write(word.getCategory().toString() + " " + word.getName() + "\n");
+//        }
         tokenizer.close();
         output.close();
     }

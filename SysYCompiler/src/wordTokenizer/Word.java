@@ -68,6 +68,11 @@ public final class Word {
         this.category = category;
     }
 
+    @Override
+    public String toString() {
+        return category.toString() + " " + name + "\n";
+    }
+
     public Category getCategory() {
         return category;
     }

@@ -3,10 +3,37 @@ package wordTokenizer;
 import exceptions.*;
 
 import java.io.EOFException;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Stack;
 
+
+class State {
+    private char sym;
+    private int lineNo;
+    private long pos;
+
+
+    State(char sym, int lineNo, long pos) {
+        this.sym = sym;
+        this.lineNo = lineNo;
+        this.pos = pos;
+    }
+
+    public char getSym() {
+        return sym;
+    }
+
+    public int getLineNo() {
+        return lineNo;
+    }
+
+    public long getPos() {
+        return pos;
+    }
+}
 /**
  *  用if...else...判断顺序编写
  *  名字字符串先全部读取再判断是否是关键字
@@ -18,13 +45,17 @@ public class SequenceTokenizer implements Tokenizer {
      */
     private final RandomAccessFile file;
     private char sym;
+    private int lineNo;
+    private Stack<State> states;
 
     /**
      * 输入文件的地址字符串
      */
-    public SequenceTokenizer(String fileAddr) throws FileNotFoundException {
+    public SequenceTokenizer(String fileAddr) throws Exception {
         this.file = new RandomAccessFile(fileAddr, "r");
         this.sym = ' ';
+        this.lineNo = 1;
+        this.states = new Stack<>();
     }
 
     /**
@@ -54,6 +85,9 @@ public class SequenceTokenizer implements Tokenizer {
             } else {
                 throw e;
             }
+        }
+        if (sym == '\n') {
+            lineNo++;
         }
         return true;
     }
@@ -200,6 +234,11 @@ public class SequenceTokenizer implements Tokenizer {
         return res.toString();
     }
 
+    /**
+     *
+     * @return 返回下一个单词，同时指针也往下移动一次
+     * @throws Exception IO等异常
+     */
     @Override
     public Word next() throws Exception {
         while (true) {
@@ -371,5 +410,38 @@ public class SequenceTokenizer implements Tokenizer {
                 default: throw new IllegalCharacterException("No such character");
             }
         }
+    }
+
+    /**
+     * requires num > 0
+     * @param num 偷看下num个单词
+     * @return 返回下num个单词的列表，指针不动
+     * @throws Exception 异常同next
+     */
+    @Override
+    public List<Word> peek(int num) throws Exception {
+        List<Word> list = new ArrayList<>();
+        peekStart();
+        for (int i = 0; i < num; i++) {
+            list.add(next());
+        }
+        peekEnd();
+        return list;
+    }
+
+    private void setState(State state) throws IOException {
+        sym = state.getSym();
+        lineNo = state.getLineNo();
+        file.seek(state.getPos());
+    }
+
+    @Override
+    public void peekStart() throws IOException {
+        states.push(new State(sym, lineNo, file.getFilePointer()));
+    }
+
+    @Override
+    public void peekEnd() throws IOException {
+        setState(states.pop());
     }
 }
