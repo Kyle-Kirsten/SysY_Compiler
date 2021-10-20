@@ -58,6 +58,14 @@ public class SequenceTokenizer implements Tokenizer {
         this.states = new Stack<>();
     }
 
+    @Override
+    public int getLineNo() {
+        if (sym == '\n') {
+            return lineNo - 1;
+        }
+        return lineNo;
+    }
+
     /**
      *  关闭读取的文件
      * @throws IOException
@@ -108,10 +116,11 @@ public class SequenceTokenizer implements Tokenizer {
     }
 
     /**
-     * 跳过当前行，让sym指下下一行
+     * 跳过当前行，让sym指向下一行
      * @throws IOException
      */
-    private void skipLine() throws IOException {
+    @Override
+    public void skipLine() throws IOException {
         while (sym != '\n') {
             if (!readChar()) {
                 sym = ' ';
@@ -191,13 +200,15 @@ public class SequenceTokenizer implements Tokenizer {
      * @throws IOException
      * @throws FormatStringException
      */
-    private String readFormatString() throws IOException, FormatStringException {
+    private FString readFormatString() throws Exception {
         StringBuilder res = new StringBuilder("");
+        int num = 0;
+        boolean illegal = false;
         char tmp;
         do {
             res.append(sym);
             if (!readChar()) {
-                throw new FormatStringException("No matching \"");
+                throw new FormatStringException("No matching \" at " + lineNo);
             }
             //先把sym记起来
             tmp = sym;
@@ -205,15 +216,19 @@ public class SequenceTokenizer implements Tokenizer {
             if (tmp == '\\' || tmp == '%') {
                 res.append(tmp);
                 if (!readChar()) {
-                    throw new FormatStringException("No matching with \"");
+                    throw new FormatStringException("No matching with \" at " + lineNo);
                 }
                 // 检查是否为\n
                 if (tmp == '\\' && sym != 'n') {
-                    throw new FormatStringException("Wrong matching with \\");
+                    illegal = true;
                 }
                 // 检查是否为%d
                 if (tmp == '%' && sym != 'd') {
-                    throw new FormatStringException("Wrong matching with %");
+                    illegal = true;
+                }
+                // 记录参数个数
+                if (tmp == '%' && sym == 'd') {
+                    num++;
                 }
                 continue;
             }
@@ -227,11 +242,10 @@ public class SequenceTokenizer implements Tokenizer {
             }
             // 检查字符范围
             if (!(tmp == 32 || tmp == 33 || 40 <= tmp && tmp <= 126)) {
-                throw new FormatStringException("Wrong character");
+                illegal = true;
             }
-
         } while (true);
-        return res.toString();
+        return new FString(res.toString(), Category.STRCON, getLineNo(), num, illegal);
     }
 
     /**
@@ -253,10 +267,10 @@ public class SequenceTokenizer implements Tokenizer {
                 Word res = Word.KEY_WORD.get(name);
                 // 是关键字直接返回相应的单词
                 if (res != null) {
-                    return res;
+                    return new Word(name, res.getCategory(), getLineNo());
                 }
                 // 否则是标识符
-                return new Word(name, Category.IDENFR);
+                return new Word(name, Category.IDENFR, getLineNo());
             }
             // sym为数字开头
             if (Character.isDigit(sym)) {
@@ -264,39 +278,39 @@ public class SequenceTokenizer implements Tokenizer {
                 if (sym == '0') {
                     if (!readChar()) {
                         sym = ' ';
-                        return Word.ZERO;
+                        return new Word(Word.ZERO.getName(), Word.ZERO.getCategory(), getLineNo());
                     }
                     // 若有前导0则违法
                     if (Character.isDigit(sym)) {
                         throw new IntConstException("Redundant 0");
                     }
                     // 否则为0
-                    return Word.ZERO;
+                    return new Word(Word.ZERO.getName(), Word.ZERO.getCategory(), getLineNo());
                 }
                 // 为非0数字开头
-                return new Word(readInt(), Category.INTCON);
+                return new Word(readInt(), Category.INTCON, getLineNo());
             }
             // sym为!
             if (sym == '!') {
                 if (!readChar()) {
                     sym = ' ';
-                    return Word.NOT;
+                    return new Word(Word.NOT.getName(), Word.NOT.getCategory(), getLineNo());
                 }
                 // 为!=
                 if (sym == '=') {
                     if (!readChar()) {
                         sym = ' ';
                     }
-                    return Word.NEQ;
+                    return new Word(Word.NEQ.getName(), Word.NEQ.getCategory(), getLineNo());
                 }
                 //否则为!
-                return Word.NOT;
+                return new Word(Word.NOT.getName(), Word.NOT.getCategory(), getLineNo());
             }
             // sym为"，一定是格式字符串
             // 要求为32, 33, 40-126的ASCII字符
             // 且%, \字符只能有%d和\n搭配
             if (sym == '"') {
-                return new Word(readFormatString(), Category.STRCON);
+                return readFormatString();
             }
             // sym为&
             if (sym == '&') {
@@ -309,7 +323,7 @@ public class SequenceTokenizer implements Tokenizer {
                 if (!readChar()) {
                     sym = ' ';
                 }
-                return Word.AND;
+                return new Word(Word.AND.getName(), Word.AND.getCategory(), getLineNo());
             }
             // sym为|
             if (sym == '|') {
@@ -322,55 +336,55 @@ public class SequenceTokenizer implements Tokenizer {
                 if (!readChar()) {
                     sym = ' ';
                 }
-                return Word.OR;
+                return new Word(Word.OR.getName(), Word.OR.getCategory(), getLineNo());
             }
             // sym为<
             if (sym == '<') {
                 if (!readChar()) {
                     sym = ' ';
-                    return Word.LST;
+                    return new Word(Word.LST.getName(), Word.LST.getCategory(), getLineNo());
                 }
                 if (sym != '=') {
-                    return Word.LST;
+                    return new Word(Word.LST.getName(), Word.LST.getCategory(), getLineNo());
                 }
                 if (!readChar()) {
                     sym = ' ';
                 }
-                return Word.LEQ;
+                return new Word(Word.LEQ.getName(), Word.LEQ.getCategory(), getLineNo());
             }
             // sym为>
             if (sym == '>') {
                 if (!readChar()) {
                     sym = ' ';
-                    return Word.GRT;
+                    return new Word(Word.GRT.getName(), Word.GRT.getCategory(), getLineNo());
                 }
                 if (sym != '=') {
-                    return Word.GRT;
+                    return new Word(Word.GRT.getName(), Word.GRT.getCategory(), getLineNo());
                 }
                 if (!readChar()) {
                     sym = ' ';
                 }
-                return Word.GEQ;
+                return new Word(Word.GEQ.getName(), Word.GEQ.getCategory(), getLineNo());
             }
             // sym为=
             if (sym == '=') {
                 if (!readChar()) {
                     sym = ' ';
-                    return Word.ASSIGN;
+                    return new Word(Word.ASSIGN.getName(), Word.ASSIGN.getCategory(), getLineNo());
                 }
                 if (sym != '=') {
-                    return Word.ASSIGN;
+                    return new Word(Word.ASSIGN.getName(), Word.ASSIGN.getCategory(), getLineNo());
                 }
                 if (!readChar()) {
                     sym = ' ';
                 }
-                return Word.EQL;
+                return new Word(Word.EQL.getName(), Word.EQL.getCategory(), getLineNo());
             }
             // sym为/，有可能是注释
             if (sym == '/') {
                 if (!readChar()) {
                     sym = ' ';
-                    return Word.DIV;
+                    return new Word(Word.DIV.getName(), Word.DIV.getCategory(), getLineNo());
                 }
                 // 为行注释
                 if (sym == '/') {
@@ -387,7 +401,7 @@ public class SequenceTokenizer implements Tokenizer {
                     continue;
                 }
                 // 为除法
-                return Word.DIV;
+                return new Word(Word.DIV.getName(), Word.DIV.getCategory(), getLineNo());
             }
             // 其余的为简单单个字符
             char tmp = sym;
@@ -395,18 +409,20 @@ public class SequenceTokenizer implements Tokenizer {
                 sym = ' ';
             }
             switch (tmp) {
-                case '+': return Word.PLUS;
-                case '-': return Word.MINUS;
-                case '*': return Word.MULT;
-                case '%': return Word.MOD;
-                case ';': return Word.SEMICN;
-                case ',': return Word.COMMA;
-                case '(': return Word.LPARENT;
-                case ')': return Word.RPARENT;
-                case '[': return Word.LBRK;
-                case ']': return Word.RBRK;
-                case '{': return Word.LBIG;
-                case '}': return Word.RBIG;
+                case '+': return new Word(Word.PLUS.getName(), Word.PLUS.getCategory(), getLineNo());
+                case '-': return new Word(Word.MINUS.getName(), Word.MINUS.getCategory(), getLineNo());
+                case '*': return new Word(Word.MULT.getName(), Word.MULT.getCategory(), getLineNo());
+                case '%': return new Word(Word.MOD.getName(), Word.MOD.getCategory(), getLineNo());
+                case ';': return new Word(Word.SEMICN.getName(), Word.SEMICN.getCategory(), getLineNo());
+                case ',': return new Word(Word.COMMA.getName(), Word.COMMA.getCategory(), getLineNo());
+                case '(': return new Word(Word.LPARENT.getName(), Word.LPARENT.getCategory(),
+                        getLineNo());
+                case ')': return new Word(Word.RPARENT.getName(), Word.RPARENT.getCategory(),
+                        getLineNo());
+                case '[': return new Word(Word.LBRK.getName(), Word.LBRK.getCategory(), getLineNo());
+                case ']': return new Word(Word.RBRK.getName(), Word.RBRK.getCategory(), getLineNo());
+                case '{': return new Word(Word.LBIG.getName(), Word.LBIG.getCategory(), getLineNo());
+                case '}': return new Word(Word.RBIG.getName(), Word.RBIG.getCategory(), getLineNo());
                 default: throw new IllegalCharacterException("No such character");
             }
         }
@@ -444,4 +460,10 @@ public class SequenceTokenizer implements Tokenizer {
     public void peekEnd() throws IOException {
         setState(states.pop());
     }
+
+    @Override
+    public void peekTo() throws IOException {
+        states.pop();
+    }
+
 }

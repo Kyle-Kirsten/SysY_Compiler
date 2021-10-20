@@ -3,7 +3,7 @@ package wordTokenizer;
 import java.util.HashMap;
 import java.util.Map;
 
-public final class Word {
+public class Word {
     public static final Word END = new Word("", Category.END),
             ERROR = new Word("", Category.ERROR),
             ZERO = new Word("0", Category.INTCON),
@@ -60,12 +60,19 @@ public final class Word {
        put(VOID.name, VOID);
     }};
 
-    private final String name;
-    private final Category category;
+    private String name;
+    private Category category;
+    private int lineNo;
 
     public Word(String name, Category category) {
         this.name = name;
         this.category = category;
+        this.lineNo = 0;
+    }
+
+    public Word(String name, Category category, int lineNo) {
+        this(name, category);
+        this.lineNo = lineNo;
     }
 
     @Override
@@ -79,5 +86,9 @@ public final class Word {
 
     public String getName() {
         return name;
+    }
+
+    public int getLineNo() {
+        return lineNo;
     }
 }

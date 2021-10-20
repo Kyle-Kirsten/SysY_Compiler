@@ -13,7 +13,7 @@ public class Compiler {
         // 测试词法分析
         Tokenizer tokenizer = new SequenceTokenizer("testfile.txt");
         Word word;
-        BufferedWriter output = new BufferedWriter(new FileWriter("output.txt", false));
+        BufferedWriter output = new BufferedWriter(new FileWriter("error.txt", false));
         Grammarizer grammarizer = new Grammarizer(tokenizer, output);
         CompUnit compUnit = grammarizer.getAST();
 //        while ((word = tokenizer.next()) != Word.END) {

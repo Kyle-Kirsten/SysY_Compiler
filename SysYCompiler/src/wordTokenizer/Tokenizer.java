@@ -18,4 +18,10 @@ public interface Tokenizer {
 
     public void peekEnd() throws IOException;
 
+    public void peekTo() throws IOException;
+
+    public void skipLine() throws IOException;
+
+    public int getLineNo();
+
 }

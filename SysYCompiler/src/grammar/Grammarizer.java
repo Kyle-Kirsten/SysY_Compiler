@@ -2,27 +2,45 @@ package grammar;
 
 import exceptions.*;
 import wordTokenizer.Category;
+import wordTokenizer.FString;
 import wordTokenizer.Tokenizer;
 import wordTokenizer.Word;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
  * 在读取的过程中打印文法信息
  * peek语法成分时把isOutput置错避免输出
+ * debug控制错误信息的输出
  */
 public class Grammarizer {
     private Tokenizer tokenizer;
     private BufferedWriter output;
     private boolean isOutput;
+    private boolean debug;
+    private Stack<Map<String, Symbol>> symStack; // 变量符号表
+    private Map<String, FuncSymbol> funcs; //函数符号表
+    private int loopLevel; // 当前的循环层数
+    private Category retType; // 当前函数的返回值类型
 
     public Grammarizer(Tokenizer tokenizer, BufferedWriter output) {
-        this.isOutput = true;
+        this.isOutput = false;
         this.tokenizer = tokenizer;
         this.output = output;
+        this.debug = true;
+        this.symStack = new Stack<>();
+        this.funcs = new HashMap<>();
+        this.loopLevel = 0;
+        this.retType = Category.VOIDTK;
+    }
+
+    public Grammarizer(Tokenizer tokenizer, BufferedWriter output, boolean grammarOut,
+                       boolean debug) {
+        this(tokenizer, output);
+        this.isOutput = grammarOut;
+        this.debug = debug;
     }
 
     private void write(String str) {
@@ -35,8 +53,60 @@ public class Grammarizer {
         }
     }
 
+    private void writeError(Exception e) {
+        UserException userException;
+        if (e instanceof UserException) {
+            userException = (UserException) e;
+            if (debug) {
+                userException.prtError(output);
+            }
+        } else {
+            e.printStackTrace();
+        }
+    }
+
     public CompUnit getAST() throws Exception {
         return readCompUnit();
+    }
+
+    /**
+     * 读到一个合法的单词为止，不合法的情况直接输出错误码
+     * @return 合法单词
+     */
+    private Word readWord() throws Exception {
+        Word word;
+        do {
+            try {
+                word = tokenizer.next();
+            } catch (Exception e) {
+                writeError(e);
+                tokenizer.skipLine();
+                continue;
+            }
+            break;
+        } while (true);
+        return word;
+    }
+
+    private List<Word> peekWord(int n) throws Exception {
+        List<Word> words = new ArrayList<>();
+        do {
+            try {
+                tokenizer.peekStart();
+                for (int i = 0; i < n; i++) {
+                    words.add(tokenizer.next());
+                }
+                tokenizer.peekEnd();
+            } catch (Exception e) {
+                words = new ArrayList<>();
+                writeError(e);
+                tokenizer.skipLine();
+                tokenizer.peekTo();
+                continue;
+            }
+            break;
+        } while (true);
+        return words;
     }
 
     /**
@@ -47,10 +117,13 @@ public class Grammarizer {
     private CompUnit readCompUnit() throws Exception {
         List<TypeTree> decls = new ArrayList<>();
         List<FuncDecl> funcs = new ArrayList<>();
+        Map<String, Symbol> realm = new HashMap<>();
+        symStack.push(realm);
         //先匹配<Decl>
         do {
             tokenizer.peekStart();
-            Word word1 = tokenizer.next();
+            Word word1;
+            word1 = tokenizer.next();
             // 为常数
             if (word1.getCategory() == Category.CONSTTK) {
                 tokenizer.peekEnd();
@@ -81,10 +154,16 @@ public class Grammarizer {
         //再匹配FuncDef
         do {
             tokenizer.peekStart();
-            Word word1 = tokenizer.next();
+            Word word1;
+            word1 = tokenizer.next();
             word1 = tokenizer.next();
             //类型后为main
             if (word1.getCategory() == Category.MAINTK) {
+                tokenizer.peekEnd();
+                break;
+            }
+            //读到结束符
+            if (word1.getCategory() == Category.END) {
                 tokenizer.peekEnd();
                 break;
             }
@@ -95,7 +174,6 @@ public class Grammarizer {
         //最后匹配MainFuncDef并打印输出
         funcs.add(readMainFuncDef());
         write(NonTerminal.CompUnit.format());
-
         return new CompUnit(decls, funcs);
     }
 
@@ -105,13 +183,10 @@ public class Grammarizer {
      * @throws Exception
      */
     private TypeTree readDecl() throws Exception {
-        tokenizer.peekStart();
-        Word word = tokenizer.next();
+        Word word = tokenizer.peek(1).get(0);
         if (word.getCategory() == Category.CONSTTK) {
-            tokenizer.peekEnd();
             return readConstDecl();
         } else {
-            tokenizer.peekEnd();
             return readVarDecl();
         }
     }
@@ -124,22 +199,34 @@ public class Grammarizer {
     private TypeTree readConstDecl() throws Exception {
         Word type;
         List<VarDecl> vars = new ArrayList<>();
+        VarDecl varDecl;
+        LVal lVal;
+        Map<String, Symbol> realm = symStack.peek();
         Word word = tokenizer.next();
         write(word.toString());
         if (word.getCategory() != Category.CONSTTK) {
             throw new ConstException("no const");
         }
         type = readBType();
-        vars.add(readConstDef());
-        word = tokenizer.next();
-        write(word.toString());
+        varDecl = readConstDef();
+        lVal = varDecl.getlVal();
+        vars.add(varDecl);
+        realm.put(lVal.getName(),
+                new ConstSymbol(lVal.getName(), type.getCategory(), lVal.getIndexNum()));
+        word = tokenizer.peek(1).get(0);
         while (word.getCategory() == Category.COMMA) {
-            vars.add(readConstDef());
-            word = tokenizer.next();
-            write(word.toString());
+            write(tokenizer.next().toString());
+            varDecl = readConstDef();
+            lVal = varDecl.getlVal();
+            vars.add(varDecl);
+            realm.put(lVal.getName(),
+                    new ConstSymbol(lVal.getName(), type.getCategory(), lVal.getIndexNum()));
+            word = tokenizer.peek(1).get(0);
         }
         if (word.getCategory() != Category.SEMICN) {
-            throw new ConstException("no semicolon");
+            writeError(new SemicolonLackException("No semicolon", tokenizer.getLineNo()));
+        } else {
+            write(tokenizer.next().toString());
         }
         write(NonTerminal.ConstDecl.format());
         return new TypeTree(type, vars, true);
@@ -152,22 +239,27 @@ public class Grammarizer {
      */
     private VarDecl readConstDef() throws Exception {
         Word ident;
-        List<Node> arrayDims = new ArrayList<>();
+        List<ValExp> arrayDims = new ArrayList<>();
         Node val;
+        Map<String, Symbol> realm = symStack.peek();
         Word word = tokenizer.next();
         write(word.toString());
         if (word.getCategory() != Category.IDENFR) {
             throw new ConstException("no identifier");
         }
         ident = word;
+        if (realm.containsKey(ident.getName())) {
+            writeError(new DupNameException("Duplicated name", ident.getLineNo()));
+        }
         word = tokenizer.next();
         write(word.toString());
         while (word.getCategory() == Category.LBRACK) {
-            arrayDims.add(readConstExp());
-            word = tokenizer.next();
-            write(word.toString());
+            arrayDims.add((ValExp) readConstExp());
+            word = tokenizer.peek(1).get(0);
             if (word.getCategory() != Category.RBRACK) {
-                throw new ConstException("no ] for match");
+                writeError(new RBracketException("No ]", tokenizer.getLineNo()));
+            } else {
+                write(tokenizer.next().toString());
             }
             word = tokenizer.next();
             write(word.toString());
@@ -244,16 +336,27 @@ public class Grammarizer {
     private TypeTree readVarDecl() throws Exception {
         Word type = readBType();
         List<VarDecl> vars = new ArrayList<>();
-        vars.add(readVarDef());
+        VarDecl varDecl;
+        LVal lVal;
+        Map<String, Symbol> realm = symStack.peek();
+        varDecl = readVarDef();
+        lVal = varDecl.getlVal();
+        vars.add(varDecl);
+        realm.put(lVal.getName(), new VarSymbol(lVal.getName(), type.getCategory(), lVal.getIndexNum()));
         Word word;
         while ((word = tokenizer.peek(1).get(0)).getCategory() == Category.COMMA) {
             write(tokenizer.next().toString());
-            vars.add(readVarDef());
+            varDecl = readVarDef();
+            lVal = varDecl.getlVal();
+            vars.add(varDecl);
+            realm.put(lVal.getName(),
+                    new VarSymbol(lVal.getName(), type.getCategory(), lVal.getIndexNum()));
         }
         if (word.getCategory() != Category.SEMICN) {
-            throw new VarException("No semicolon");
+            writeError(new SemicolonLackException("No ;", tokenizer.getLineNo()));
+        } else {
+            write(tokenizer.next().toString());
         }
-        write(tokenizer.next().toString());
         write(NonTerminal.VarDecl.format());
         return new TypeTree(type, vars, false);
     }
@@ -264,21 +367,26 @@ public class Grammarizer {
      * @throws Exception
      */
     private VarDecl readVarDef() throws Exception {
+        Map<String, Symbol> realm = symStack.peek();
         Word ident = tokenizer.next();
         if (ident.getCategory() != Category.IDENFR) {
             throw new VarException("No identifier");
         }
+        if (realm.containsKey(ident.getName())) {
+            writeError(new DupNameException("dup name", ident.getLineNo()));
+        }
         write(ident.toString());
-        List<Node> arrayDims = new ArrayList<>();
+        List<ValExp> arrayDims = new ArrayList<>();
         Word word;
         while ((word = tokenizer.peek(1).get(0)).getCategory() == Category.LBRACK) {
             write(tokenizer.next().toString());
-            arrayDims.add(readConstExp());
-            word = tokenizer.next();
+            arrayDims.add((ValExp) readConstExp());
+            word = tokenizer.peek(1).get(0);
             if (word.getCategory() != Category.RBRACK) {
-                throw new VarException("No ] for match");
+                writeError(new RBracketException("No ]", tokenizer.getLineNo()));
+            } else {
+                write(tokenizer.next().toString());
             }
-            write(word.toString());
         }
         Node val;
         if (word.getCategory() == Category.ASSIGN) {
@@ -336,34 +444,53 @@ public class Grammarizer {
      * @return
      */
     private FuncDecl readFuncDef() throws Exception {
+        Map<String, FuncSymbol> realm = funcs;
         Word type = readFuncType();
         Word ident = tokenizer.next();
         if (ident.getCategory() != Category.IDENFR) {
             throw new FuncException("No identifier");
         }
+        if (realm.containsKey(ident.getName())) {
+            writeError(new DupNameException("Dup func", ident.getLineNo()));
+        }
         write(ident.toString());
         Word word = tokenizer.next();
-        if (word != Word.LPARENT) {
+        if (word.getCategory() != Category.LPARENT) {
             throw new FuncException("No (");
         }
         write(word.toString());
         List<FuncFParam> params = new ArrayList<>();
-        if (tokenizer.peek(1).get(0) != Word.RPARENT) {
+        symStack.push(new HashMap<>());
+        if (tokenizer.peek(1).get(0).getCategory() != Category.RPARENT) {
             params = readFuncFParams();
         }
-        word = tokenizer.next();
-        if (word != Word.RPARENT) {
-            throw new FuncException("No )");
+        List<VarSymbol> paramSymbols = new ArrayList<>();
+        for (FuncFParam param : params) {
+            paramSymbols.add(param.toVarSymbol());
         }
-        write(word.toString());
-        Block block = readBlock();
+        realm.put(ident.getName(),
+                new FuncSymbol(ident.getName(), type.getCategory(), paramSymbols));
+        word = tokenizer.peek(1).get(0);
+        if (word.getCategory() != Category.RPARENT) {
+            writeError(new RParentException("No )", tokenizer.getLineNo()));
+        } else {
+            write(tokenizer.next().toString());
+        }
+        retType = type.getCategory();
+        Block block = readBlock(true);
+        retType = Category.VOIDTK;
+        symStack.pop();
+        if ( type.getCategory() != Category.VOIDTK && !(block.getLastStmt() instanceof ReturnExp) )
+        {
+            writeError(new ReturnLackException("No return statement", block.getEndLine()));
+        }
         write(NonTerminal.FuncDef.format());
         return new FuncDecl(type, ident, params, block);
     }
 
     private Word readFuncType() throws Exception {
         Word type = tokenizer.next();
-        if (type != Word.INT && type != Word.VOID) {
+        if (type.getCategory() != Category.INTTK && type.getCategory() != Category.VOIDTK) {
             throw new TypeException("Wrong func type");
         }
         write(type.toString());
@@ -374,7 +501,7 @@ public class Grammarizer {
     private List<FuncFParam> readFuncFParams() throws Exception {
         List<FuncFParam> params = new ArrayList<>();
         params.add(readFuncFParam());
-        while (tokenizer.peek(1).get(0) == Word.COMMA) {
+        while (tokenizer.peek(1).get(0).getCategory() == Category.COMMA) {
             write(tokenizer.next().toString());
             params.add(readFuncFParam());
         }
@@ -383,33 +510,41 @@ public class Grammarizer {
     }
 
     private FuncFParam readFuncFParam() throws Exception {
+        Map<String, Symbol> realm = symStack.peek();
         Word type = readBType();
         Word ident = tokenizer.next();
         if (ident.getCategory() != Category.IDENFR) {
             throw new FuncException("Function's parameter has no identifier");
         }
+        if (realm.containsKey(ident.getName())) {
+            writeError(new DupNameException("Dup parameter", ident.getLineNo()));
+        }
         write(ident.toString());
         List<Node> arrayDims = new ArrayList<>();
         Word word = tokenizer.peek(1).get(0);
-        if (word == Word.LBRK) {
+        if (word.getCategory() == Category.LBRACK) {
             write(tokenizer.next().toString());
-            word = tokenizer.next();
-            if (word != Word.RBRK) {
-                throw new FuncException("Wrong function's array parameter");
+            word = tokenizer.peek(1).get(0);
+            if (word.getCategory() != Category.RBRACK) {
+                writeError(new RBracketException("No ]", tokenizer.getLineNo()));
+            } else {
+                write(tokenizer.next().toString());
             }
-            write(word.toString());
             arrayDims.add(Node.unDefined);
-            while (tokenizer.peek(1).get(0) == Word.LBRK) {
+            while (tokenizer.peek(1).get(0).getCategory() == Category.LBRACK) {
                 write(tokenizer.next().toString());
                 arrayDims.add(readConstExp());
-                word = tokenizer.next();
-                if (word != Word.RBRK) {
-                    throw new FuncException("No matching ]");
+                word = tokenizer.peek(1).get(0);
+                if (word.getCategory() != Category.RBRACK) {
+                    writeError(new RBracketException("No ]", tokenizer.getLineNo()));
+                } else {
+                    write(tokenizer.next().toString());
                 }
-                write(word.toString());
             }
         }
         write(NonTerminal.FuncFParam.format());
+        realm.put(ident.getName(),
+                new VarSymbol(ident.getName(), type.getCategory(), arrayDims.size()));
         return new FuncFParam(type, ident, arrayDims);
     }
 
@@ -419,48 +554,66 @@ public class Grammarizer {
      */
     private FuncDecl readMainFuncDef() throws Exception {
         Word word = tokenizer.next();
-        if (word != Word.INT) {
+        if (word.getCategory() != Category.INTTK) {
             throw new FuncException("Wrong type of main function");
         }
         write(word.toString());
         word = tokenizer.next();
-        if (word != Word.MAIN) {
+        if (word.getCategory() != Category.MAINTK) {
             throw new FuncException("No Main function");
         }
         write(word.toString());
         word = tokenizer.next();
-        if (word != Word.LPARENT) {
+        if (word.getCategory() != Category.LPARENT) {
             throw new FuncException("No (");
         }
         write(word.toString());
         word = tokenizer.next();
-        if (word != Word.RPARENT) {
+        if (word.getCategory() != Category.RPARENT) {
             throw new FuncException("Exist parameters in main function");
         }
         write(word.toString());
-        Block block = readBlock();
+        retType = Category.INTTK;
+        symStack.push(new HashMap<>());
+        Block block = readBlock(true);
+        symStack.pop();
+        retType = Category.VOIDTK;
+        if (!(block.getLastStmt() instanceof ReturnExp)) {
+            writeError(new ReturnLackException("No return in main", block.getEndLine()));
+        }
         write(NonTerminal.MainFuncDef.format());
         return new FuncDecl(Word.INT, Word.MAIN, new ArrayList<>(), block);
     }
 
     private Block readBlock() throws Exception {
+        return readBlock(false);
+    }
+
+    private Block readBlock(boolean sameBlock) throws Exception {
+        if (!sameBlock) {
+            symStack.push(new HashMap<>());
+        }
         Word word = tokenizer.next();
-        if (word != Word.LBIG) {
+        if (word.getCategory() != Category.LBRACE) {
             throw new FuncException("No {");
         }
         write(word.toString());
         List<Node> stmts = new ArrayList<>();
-        while (tokenizer.peek(1).get(0) != Word.RBIG) {
+        while (tokenizer.peek(1).get(0).getCategory() != Category.RBRACE) {
             stmts.add(readBlockItem());
         }
-        write(tokenizer.next().toString());
+        word = tokenizer.next();
+        write(word.toString());
         write(NonTerminal.Block.format());
-        return new Block(stmts);
+        if (!sameBlock) {
+            symStack.pop();
+        }
+        return new Block(stmts, word);
     }
 
     private Node readBlockItem() throws Exception {
         Word word = tokenizer.peek(1).get(0);
-        if (word == Word.CONST || word == Word.INT) {
+        if (word.getCategory() == Category.CONSTTK || word.getCategory() == Category.INTTK) {
             return readDecl();
         }
         return readStmt();
@@ -471,19 +624,18 @@ public class Grammarizer {
         Word word = tokenizer.peek(1).get(0);
         switch (word.getCategory()) {
             case IDENFR:
+                boolean isOutput0 = isOutput;
+                boolean isDebug = debug;
+                isOutput = false;
+                debug = false;
                 tokenizer.peekStart();
-                if (isOutput) {
-                    isOutput = false;
-                    readLVal();
-                    word = tokenizer.next();
-                    tokenizer.peekEnd();
-                    isOutput = true;
-                } else {
-                    readLVal();
-                    word = tokenizer.next();
-                    tokenizer.peekEnd();
-                }
-                if (word == Word.ASSIGN) {
+                readLVal();
+                word = tokenizer.next();
+                tokenizer.peekEnd();
+                isOutput = isOutput0;
+                debug = isDebug;
+
+                if (word.getCategory() == Category.ASSIGN) {
                     stmt = readAssign();
                 } else {
                     stmt = readExp();
@@ -504,11 +656,18 @@ public class Grammarizer {
                 stmt = readWhile();
                 break;
             case BREAKTK:
+                if (loopLevel <= 0) {
+                    writeError(new BreakContinueException("Break in non-loop", word.getLineNo()));
+                }
                 write(tokenizer.next().toString());
                 stmt = new BreakExp();
                 readSemiColon();
                 break;
             case CONTINUETK:
+                if (loopLevel <= 0) {
+                    writeError(new BreakContinueException("Continue in non-loop",
+                            word.getLineNo()));
+                }
                 write(tokenizer.next().toString());
                 stmt = new ContinueExp();
                 readSemiColon();
@@ -531,34 +690,39 @@ public class Grammarizer {
     }
 
     private void readSemiColon() throws Exception {
-        Word word = tokenizer.next();
-        if (word != Word.SEMICN) {
-            throw new FuncException("Stmt has no semicolon");
+        Word word = tokenizer.peek(1).get(0);
+        if (word.getCategory() != Category.SEMICN) {
+            writeError(new SemicolonLackException("No ;", tokenizer.getLineNo()));
+        } else {
+            write(tokenizer.next().toString());
         }
-        write(word.toString());
     }
 
     private VarDecl readAssign() throws Exception {
         LVal lVal = readLVal();
+        if (lVal.getSymbol() instanceof ConstSymbol) {
+            writeError(new ConstChangeException("Constant can't be assigned", lVal.getLineNo()));
+        }
         Node val;
         Word word = tokenizer.next();
-        if (word != Word.ASSIGN) {
+        if (word.getCategory() != Category.ASSIGN) {
             throw new FuncException("No =");
         }
         write(word.toString());
         word = tokenizer.peek(1).get(0);
-        if (word == Word.GETINT) {
+        if (word.getCategory() == Category.GETINTTK) {
             write(tokenizer.next().toString());
             word = tokenizer.next();
-            if (word != Word.LPARENT) {
+            if (word.getCategory() != Category.LPARENT) {
                 throw new FuncException("No ( follows getint");
             }
             write(word.toString());
-            word = tokenizer.next();
-            if (word != Word.RPARENT) {
-                throw new FuncException("No ) follows getint");
+            word = tokenizer.peek(1).get(0);
+            if (word.getCategory() != Category.RPARENT) {
+                writeError(new RParentException("No ) for getint", tokenizer.getLineNo()));
+            } else {
+                write(tokenizer.next().toString());
             }
-            write(word.toString());
             val = new GetIntExp();
         } else {
             val = readExp();
@@ -572,42 +736,55 @@ public class Grammarizer {
             throw new FuncException("No identifier in left value");
         }
         write(ident.toString());
-        List<Node> index = new ArrayList<>();
-        Word word;
-        while (tokenizer.peek(1).get(0) == Word.LBRK) {
-            write(tokenizer.next().toString());
-            index.add(readExp());
-            word = tokenizer.next();
-            if (word != Word.RBRK) {
-                throw new FuncException("No ]");
+        Symbol lValSymbol = Symbol.undefined;
+        for (int i = symStack.size(); i > 0; i--) {
+            Symbol tmp =  symStack.get(i - 1).get(ident.getName());
+            if (tmp != null) {
+                lValSymbol = tmp;
+                break;
             }
-            write(word.toString());
+        }
+        if (lValSymbol == Symbol.undefined) {
+            writeError(new UndeclaredException("Can't find lVal", ident.getLineNo()));
+        }
+        List<ValExp> index = new ArrayList<>();
+        Word word;
+        while (tokenizer.peek(1).get(0).getCategory() == Category.LBRACK) {
+            write(tokenizer.next().toString());
+            index.add((ValExp) readExp());
+            word = tokenizer.peek(1).get(0);
+            if (word.getCategory() != Category.RBRACK) {
+                writeError(new RBracketException("No ]", tokenizer.getLineNo()));
+            } else {
+                write(tokenizer.next().toString());
+            }
         }
         write(NonTerminal.LVal.format());
-        return new LVal(ident, index);
+        return new LVal(ident, index, lValSymbol);
     }
 
     private IfExp readIf() throws Exception {
         Word word = tokenizer.next();
-        if (word != Word.IF) {
+        if (word.getCategory() != Category.IFTK) {
             throw new FuncException("No if");
         }
         write(word.toString());
         word = tokenizer.next();
-        if (word != Word.LPARENT) {
+        if (word.getCategory() != Category.LPARENT) {
             throw new FuncException("No ( matched for condition");
         }
         write(word.toString());
         Node cond = readCond();
-        word = tokenizer.next();
-        if (word != Word.RPARENT) {
-            throw new FuncException("No ) matched for condition");
+        word = tokenizer.peek(1).get(0);
+        if (word.getCategory() != Category.RPARENT) {
+            writeError(new RParentException("No ) for if", tokenizer.getLineNo()));
+        } else {
+            write(tokenizer.next().toString());
         }
-        write(word.toString());
         Node ifBody = readStmt();
         Node elseBody = Node.unDefined;
         word = tokenizer.peek(1).get(0);
-        if (word == Word.ELSE) {
+        if (word.getCategory() == Category.ELSETK) {
             write(tokenizer.next().toString());
             elseBody = readStmt();
         }
@@ -616,35 +793,42 @@ public class Grammarizer {
 
     private WhileExp readWhile() throws Exception {
         Word word = tokenizer.next();
-        if (word != Word.WHILE) {
+        if (word.getCategory() != Category.WHILETK) {
             throw new FuncException("No while");
         }
         write(word.toString());
         word = tokenizer.next();
-        if (word != Word.LPARENT) {
+        if (word.getCategory() != Category.LPARENT) {
             throw new FuncException("No ( matched for condition");
         }
         write(word.toString());
         Node cond = readCond();
-        word = tokenizer.next();
-        if (word != Word.RPARENT) {
-            throw new FuncException("No ) matched for condition");
+        word = tokenizer.peek(1).get(0);
+        if (word.getCategory() != Category.RPARENT) {
+            writeError(new RParentException("No ) for while", tokenizer.getLineNo()));
+        } else {
+            write(tokenizer.next().toString());
         }
-        write(word.toString());
+        loopLevel++;
         Node whileBody = readStmt();
+        loopLevel--;
         return new WhileExp(cond, whileBody);
     }
 
     private ReturnExp readReturn() throws Exception {
         Word word = tokenizer.next();
-        if (word != Word.RETURN) {
+        if (word.getCategory() != Category.RETURNTK) {
             throw new FuncException("No return");
         }
         write(word.toString());
+        Word ret = word;
         Node val = Node.unDefined;
         word = tokenizer.peek(1).get(0);
-        if (word != Word.SEMICN) {
+        if (word.getCategory() != Category.SEMICN) {
             val = readExp();
+            if (retType == Category.VOIDTK) {
+                writeError(new ReturnExistException("Wrong return", ret.getLineNo()));
+            }
         }
         return new ReturnExp(val);
 
@@ -652,29 +836,38 @@ public class Grammarizer {
 
     private PrintExp readPrint() throws Exception {
         Word word = tokenizer.next();
-        if (word != Word.PRINTF) {
+        if (word.getCategory() != Category.PRINTFTK) {
             throw new FuncException("No printf");
         }
         write(word.toString());
+        Word printf = word;
         word = tokenizer.next();
-        if (word != Word.LPARENT) {
+        if (word.getCategory() != Category.LPARENT) {
             throw new FuncException("No ( for printf");
         }
         write(word.toString());
-        Word fStr = tokenizer.next();
-        if (fStr.getCategory() != Category.STRCON) {
+        word = tokenizer.next();
+        if (word.getCategory() != Category.STRCON) {
             throw new FuncException("No string for printf");
+        }
+        FString fStr = (FString) word;
+        if (fStr.isIllegal()) {
+            writeError(new IllegalFStrCharException("Illegal character", fStr.getLineNo()));
         }
         write(fStr.toString());
         List<Node> params = new ArrayList<>();
-        while ((word = tokenizer.peek(1).get(0)) == Word.COMMA) {
+        while ((word = tokenizer.peek(1).get(0)).getCategory() == Category.COMMA) {
             write(tokenizer.next().toString());
             params.add(readExp());
         }
-        if (word != Word.RPARENT) {
-            throw new FuncException("No ) for printf");
+        if (word.getCategory() != Category.RPARENT) {
+            writeError(new RParentException("NO ) for printf", tokenizer.getLineNo()));
+        } else {
+            write(tokenizer.next().toString());
         }
-        write(tokenizer.next().toString());
+        if (params.size() != fStr.getNum()) {
+            writeError(new PrintfException("Unmatched number of parameters", printf.getLineNo()));
+        }
         return new PrintExp(fStr, params);
     }
 
@@ -789,13 +982,15 @@ public class Grammarizer {
             case LPARENT:
                 write(tokenizer.next().toString());
                 Node exp = readExp();
-                word = tokenizer.next();
-                if (word != Word.RPARENT) {
-                    throw new FuncException("No ) matched for expression");
+                word = tokenizer.peek(1).get(0);
+                if (word.getCategory() != Category.RPARENT) {
+                    writeError(new RParentException("No ) for primary expression",
+                            tokenizer.getLineNo()));
+                } else {
+                    write(tokenizer.next().toString());
                 }
-                write(word.toString());
                 write(NonTerminal.PrimaryExp.format());
-                return new ParentExp(exp);
+                return new ParentExp((ValExp) exp);
             case IDENFR:
                 LVal lVal = readLVal();
                 write(NonTerminal.PrimaryExp.format());
@@ -824,25 +1019,58 @@ public class Grammarizer {
         List<Word> words = tokenizer.peek(3);
         switch (words.get(0).getCategory()) {
             case IDENFR:
-                if (words.get(1) != Word.LPARENT) {
+                if (words.get(1).getCategory() != Category.LPARENT) {
                     res = readPrimaryExp();
                     break;
+                }
+                FuncSymbol funcSymbol = funcs.get(words.get(0).getName());
+                if (funcSymbol == null) {
+                    writeError(new UndeclaredException("No such function",
+                            words.get(0).getLineNo()));
                 }
                 write(tokenizer.next().toString());
                 write(tokenizer.next().toString());
                 List<Node> params = new ArrayList<>();
-                if (words.get(2) == Word.RPARENT) {
+                if (words.get(2).getCategory() == Category.RPARENT) {
                     write(tokenizer.next().toString());
-                    res = new FuncCall(words.get(0), params);
+                    if (funcSymbol != null && funcSymbol.getParams().size() != 0) {
+                        writeError(new ParamNumException("Number of Parameter is not zero",
+                                words.get(0).getLineNo()));
+                    }
+                    res = new FuncCall(words.get(0), params,
+                            funcSymbol == null ? funcSymbol.getReturnType() : Category.VOIDTK);
                     break;
                 }
                 params = readFuncRParams();
-                Word word = tokenizer.next();
-                if (word != Word.RPARENT) {
-                    throw new FuncException("No match ) for Function call");
+                if (funcSymbol != null && funcSymbol.getParams().size() != params.size()) {
+                    writeError(new ParamNumException("Unmatched number of parameters",
+                            words.get(0).getLineNo()));
+                } else if (funcSymbol != null) {
+                    for (int i = 0; i < params.size(); i++) {
+                        if (!(params.get(i) instanceof ValExp)) {
+                            writeError(new ParamTypeException("Undefined type",
+                                    words.get(0).getLineNo()));
+                            break;
+                        }
+                        ValExp valExp = (ValExp) params.get(i);
+                        VarSymbol varSymbol = funcSymbol.getParams().get(i);
+                        if (valExp.getType() != varSymbol.getType()
+                                || valExp.getDims() != varSymbol.getDims()) {
+                            writeError(new ParamTypeException("Unmatched parameter",
+                                    words.get(0).getLineNo()));
+                            break;
+                        }
+                    }
                 }
-                write(word.toString());
-                res = new FuncCall(words.get(0), params);
+                Word word = tokenizer.peek(1).get(0);
+                if (word.getCategory() != Category.RPARENT) {
+                    writeError(new RParentException("No ) for function call",
+                            tokenizer.getLineNo()));
+                } else {
+                    write(tokenizer.next().toString());
+                }
+                res = new FuncCall(words.get(0), params,
+                        funcSymbol == null ? funcSymbol.getReturnType() : Category.VOIDTK);
                 break;
             case LPARENT:
             case INTCON:
@@ -874,7 +1102,7 @@ public class Grammarizer {
     private List<Node> readFuncRParams() throws Exception {
         List<Node> params = new ArrayList<>();
         params.add(readExp());
-        while (tokenizer.peek(1).get(0) == Word.COMMA) {
+        while (tokenizer.peek(1).get(0).getCategory() == Category.COMMA) {
             write(tokenizer.next().toString());
             params.add(readExp());
         }

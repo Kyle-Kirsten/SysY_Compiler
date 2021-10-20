@@ -15,4 +15,8 @@ public class FuncFParam extends Node {
         this.ident = ident;
         this.arrayDims = arrayDims;
     }
+
+    public VarSymbol toVarSymbol() {
+        return new VarSymbol(ident.getName(), type.getCategory(), arrayDims.size());
+    }
 }

@@ -1,5 +1,7 @@
 package grammar;
 
-public class Node {
-    public static final Node unDefined = new Node();
+public abstract class Node {
+    public static final Node unDefined = new Node() {
+
+    };
 }

@@ -139,3 +139,27 @@ Exp需要覆盖数组传参和部分数组传参
 > 
 > ArrayExp -> elems:{Node}
 
+## 错误处理
+基本原则：语法错误直接抛出异常，不进行处理；
+语义错误和个别语法错误遇见直接输出错误信息，然后当作正常语法成分处理
+
+具体细节：
+* 词法分析中的FormatString只记录是否有违法字符，不抛异常，违法字符异常只在readPrint中检测并处理
+* 词法分析也记录单词的行号
+* readCompUnit中无错误处理
+* readDecl中处理缺少分号错误
+* readConstDef中处理重定义和缺少右中括号错误
+* readConstInitVal中不处理
+* readConstExp中不处理
+* readBType中不处理
+* readVarDecl中处理缺少分号错误
+* readVarDef中处理重定义和右中括号错误  
+* readFuncDef中处理重定义、缺少右小括号和缺少返回语句
+* readFParams不处理
+* readFParam中处理重定义和缺少右中括号  
+* readMain中处理缺少返回语句
+* readStmt中处理不匹配return错误(readReturn)、改变常量错误(readAssign)、 
+  缺少右小括号(readIf, readWhile, readGetInt, readPrint)、
+  缺少分号(readSemicolon)、非法字符串和%d个数匹配错误(readPrint)、break和continue错误
+* readLVal中处理未定义名字和缺少右中括号的错误
+* readUnaryExp中处理未定义函数和函数调用参数个数、类型不匹配，以及右小括号
